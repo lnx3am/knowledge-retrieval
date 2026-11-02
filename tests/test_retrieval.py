@@ -71,6 +71,30 @@ def test_vector_finds_synonym(tmp_path):
     assert store.search("a", "downtime")[0]["source"] == "runbook"
 
 
+def test_lexical_reingestion_removes_stale_vectors_only_for_replaced_source(tmp_path):
+    path = str(tmp_path / "vectors.db")
+    vectors = Store(path, embed=lambda text: [1.0, 0.0])
+    vectors.ingest("demo", "runbook", "outage response procedure", size=1)
+    vectors.ingest("demo", "handoff", "owner checklist")
+    vectors.ingest("other", "runbook", "private outage procedure")
+    with sqlite3.connect(path) as db:
+        preserved = db.execute(
+            "SELECT v.id,v.vector FROM vectors v JOIN chunks c ON c.id=v.id "
+            "WHERE c.tenant != 'demo' OR c.source != 'runbook' ORDER BY v.id",
+        ).fetchall()
+
+    # The CLI can reopen a vector-backed database without --embeddings.
+    lexical = Store(path)
+    assert lexical.ingest("demo", "runbook", "replacement content") == 1
+    assert lexical.search("demo", "outage") == []
+    assert [hit["source"] for hit in lexical.search("demo", "replacement")] == ["runbook"]
+    # A subsequent vector search must not rank replacement text using the old embedding.
+    assert [hit["source"] for hit in vectors.search("demo", "downtime")] == ["handoff"]
+    assert [hit["source"] for hit in vectors.search("other", "downtime")] == ["runbook"]
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT id,vector FROM vectors ORDER BY id").fetchall() == preserved
+
+
 @pytest.mark.parametrize("query", ["故障", "قطعی", "διακοπή"])
 def test_vector_search_handles_queries_without_ascii_tokens(tmp_path, query):
     calls = []
