@@ -422,3 +422,52 @@ def test_later_chunk_embedding_failure_rolls_back_entire_reingestion(tmp_path):
     assert store.ingest("demo", "runbook", "replacement outage new procedure", size=2) == 2
     assert {hit["text"] for hit in store.search("demo", "outage")} == {
         "replacement outage", "new procedure"}
+
+
+def test_concurrent_reingestion_keeps_fts_consistent(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, current_thread
+
+    store = Store(str(tmp_path / "knowledge.db"))
+    connect = sqlite3.connect
+    first_thread = current_thread()
+    second_ready = Event()
+    first_finished = Event()
+    futures = []
+
+    class ScheduledConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            is_first = current_thread() is first_thread
+            if not is_first and sql == "BEGIN IMMEDIATE":
+                # With serialization, the second writer waits here for the first commit.
+                second_ready.set()
+            cursor = super().execute(sql, parameters)
+            if sql.startswith("SELECT id FROM chunks"):
+                rows = cursor.fetchall()
+                if is_first:
+                    futures.append(pool.submit(store.ingest, "demo", "runbook", "second version"))
+                    assert second_ready.wait(5)
+                else:
+                    # Without serialization, both writers read the pre-replacement IDs.
+                    second_ready.set()
+                    assert first_finished.wait(5)
+                return iter(rows)
+            return cursor
+
+    def scheduled_connect(*args, **kwargs):
+        return connect(*args, **kwargs, factory=ScheduledConnection)
+
+    with ThreadPoolExecutor(max_workers=1) as pool, monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", scheduled_connect)
+        try:
+            assert store.ingest("demo", "runbook", "first version") == 1
+        finally:
+            first_finished.set()
+        assert futures[0].result(timeout=10) == 1
+    with connect(store.path) as db:
+        chunks = db.execute("SELECT id,body FROM chunks").fetchall()
+        assert len(chunks) == 1
+        assert chunks[0][1] == "second version"
+        assert db.execute("SELECT id,body FROM chunk_fts").fetchall() == chunks
+    assert store.search("demo", "first") == []
+    assert [hit["text"] for hit in store.search("demo", "second")] == ["second version"]
