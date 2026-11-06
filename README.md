@@ -41,7 +41,7 @@ Ingestion defaults to the file basename as its source. For files with the same b
 Add `--answer` to the search command for an OpenAI-generated answer; set `OPENAI_API_KEY` first. Ingest `security.md` under another tenant and confirm that `demo` searches cannot see it.
 The search command rejects blank queries before creating a database or requesting an answer.
 Pass `--embeddings` on both ingest and search to include vector similarity. Keep that mode consistent for a database; the demo does not yet version embedding models.
-Embedding search also handles nonblank queries with no ASCII tokens, such as Chinese, Persian, or Greek text. Lexical ranking still uses ASCII alphanumeric tokens; blank queries never request embeddings.
+Lexical ranking matches Unicode alphanumeric words, including Chinese, Persian, and Greek text, without requiring embeddings. Matching uses word tokens rather than language-specific segmentation. Blank queries never request embeddings.
 
 Database initialization failures (including invalid SQLite files and unusable paths) produce CLI usage errors with the database path and exit status 2.
 Database read and write failures during ingestion or search also exit with status 2 and name the database, without printing results or requesting an answer.

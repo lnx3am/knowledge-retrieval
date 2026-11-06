@@ -7,6 +7,23 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("query,text", [
+    ("故障", "故障 対応 手順"),
+    ("قطعی", "راهنمای قطعی سرویس"),
+    ("ΔΙΑΚΟΠΉ", "διακοπή υπηρεσίας"),
+])
+def test_lexical_search_matches_unicode_words_with_tenant_isolation(tmp_path, query, text):
+    store = Store(str(tmp_path / "knowledge.db"))
+    store.ingest("demo", "runbook", text)
+    store.ingest("other", "private", text)
+    store.ingest("demo", "unrelated", "unrelated content")
+    hits = make_search_tool(store, "demo").invoke({"query": query})
+    assert [(hit["tenant"], hit["source"], hit["text"]) for hit in hits] == [
+        ("demo", "runbook", text)]
+    store.ingest("demo", "runbook", "replacement content")
+    assert store.search("demo", query) == []
+
+
 @pytest.mark.parametrize("use_embeddings", [False, True])
 def test_search_keeps_one_snapshot_during_concurrent_reingestion(
     tmp_path, monkeypatch, use_embeddings,

@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 def tokens(text: str) -> Counter[str]:
-    return Counter(re.findall(r"[a-z0-9]+", text.lower()))
+    return Counter(re.findall(r"[^\W_]+", text.lower()))
 
 
 def cosine(a: Counter[str], b: Counter[str]) -> float:
