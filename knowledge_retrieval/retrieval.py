@@ -76,6 +76,7 @@ class Store:
                 db.execute("DELETE FROM chunk_fts WHERE id=?", (key,))
                 db.execute("DELETE FROM vectors WHERE id=?", (key,))
             db.execute("DELETE FROM chunks WHERE tenant=? AND source=?", (tenant, source))
+            embedding_dimensions = None
             for offset in range(0, len(words), size):
                 body = " ".join(words[offset:offset + size])
                 identity = ":".join(part.replace("%", "%25").replace(":", "%3A")
@@ -85,6 +86,9 @@ class Store:
                 db.execute("INSERT INTO chunk_fts VALUES (?,?)", (key, body))
                 if self.embed:
                     vector = validate_embedding(self.embed(body))
+                    if embedding_dimensions is not None and len(vector) != embedding_dimensions:
+                        raise ValueError("embedding dimensions changed during ingestion")
+                    embedding_dimensions = len(vector)
                     db.execute("INSERT INTO vectors VALUES (?,?)", (key, json.dumps(vector)))
         return (len(words) + size - 1) // size
 

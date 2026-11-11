@@ -7,6 +7,32 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("replacing", [False, True])
+def test_inconsistent_chunk_dimensions_roll_back_ingestion_and_allow_retry(tmp_path, replacing):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", "unrelated", "unrelated incident checklist")
+    if replacing:
+        store.ingest("demo", "runbook", "original incident response procedure", size=2)
+
+    def snapshot():
+        with sqlite3.connect(store.path) as db:
+            return {table: db.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+                    for table in ("chunks", "chunk_fts", "vectors")}
+
+    original = snapshot()
+    before = store.search("demo", "incident")
+    vectors = iter([[1.0, 0.0], [1.0]])
+    store.embed = lambda text: next(vectors)
+    with pytest.raises(ValueError, match="embedding dimensions changed during ingestion"):
+        store.ingest("demo", "runbook", "replacement incident recovery procedure", size=2)
+    assert snapshot() == original
+    store.embed = lambda text: [1.0, 0.0]
+    assert store.search("demo", "incident") == before
+    assert store.ingest("demo", "runbook", "replacement incident recovery procedure", size=2) == 2
+    assert {hit["text"] for hit in store.search("demo", "incident")
+            if hit["source"] == "runbook"} == {"replacement incident", "recovery procedure"}
+
+
 def test_failed_reingestion_commit_preserves_all_indexes_and_allows_retry(tmp_path, monkeypatch):
     store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0, 0.0])
     store.ingest("demo", "runbook", "original outage response procedure", size=2)

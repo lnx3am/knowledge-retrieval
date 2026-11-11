@@ -17,6 +17,7 @@ Search reads lexical candidates, chunk contents, and vectors in one SQLite snaps
 
 Embeddings must be nonempty lists of finite numbers; booleans, strings, and malformed containers are rejected. Invalid values reject ingestion without replacing the existing index, and searches reject invalid query or stored vectors rather than silently dropping results.
 Integer components too large to represent as finite floats are also rejected as validation errors, preserving the existing index during failed ingestion.
+All chunks in one ingestion must have the same embedding dimension. A change between chunks rejects the entire ingestion and preserves the previous source, full-text entries, and vectors.
 The CLI reports invalid embeddings and dimension mismatches as usage errors (exit 2), preserving the validation reason and printing no result. Failed ingestion leaves the existing source intact.
 Vector similarity normalizes with scaling so very large or small finite magnitudes preserve ranking.
 
