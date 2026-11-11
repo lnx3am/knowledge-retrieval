@@ -7,6 +7,42 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+def test_failed_reingestion_commit_preserves_all_indexes_and_allows_retry(tmp_path, monkeypatch):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", "runbook", "original outage response procedure", size=2)
+    connect = sqlite3.connect
+
+    def snapshot():
+        with connect(store.path) as db:
+            return {table: db.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+                    for table in ("chunks", "chunk_fts", "vectors")}
+
+    original = snapshot()
+    before = store.search("demo", "outage")
+    store.embed = lambda text: [0.0, 1.0]
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(
+            *args, **{**kwargs, "timeout": 0}))
+        # A reader allows replacement writes but blocks their commit in rollback-journal mode.
+        with connect(store.path) as reader:
+            reader.execute("BEGIN")
+            reader.execute("SELECT * FROM chunks").fetchall()
+            with pytest.raises(sqlite3.OperationalError) as exc:
+                store.ingest("demo", "runbook", "replacement outage new procedure", size=2)
+            assert exc.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        assert snapshot() == original
+    store.embed = lambda text: [1.0, 0.0]
+    assert store.search("demo", "outage") == before
+    store.embed = lambda text: [0.0, 1.0]
+    assert store.ingest("demo", "runbook", "replacement outage new procedure", size=2) == 2
+    assert {hit["text"] for hit in store.search("demo", "outage")} == {
+        "replacement outage", "new procedure"}
+    assert Store(store.path).search("demo", "original") == []
+    replaced = snapshot()
+    assert replaced["chunk_fts"] == [(key, body) for key, _, _, body in replaced["chunks"]]
+    assert replaced["vectors"] == [(key, "[0.0, 1.0]") for key, *_ in replaced["chunks"]]
+
+
 @pytest.mark.parametrize("query,text", [
     ("故障", "故障 対応 手順"),
     ("قطعی", "راهنمای قطعی سرویس"),
