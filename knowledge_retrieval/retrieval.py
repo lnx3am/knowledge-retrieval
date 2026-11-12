@@ -77,6 +77,14 @@ class Store:
                 db.execute("DELETE FROM vectors WHERE id=?", (key,))
             db.execute("DELETE FROM chunks WHERE tenant=? AND source=?", (tenant, source))
             embedding_dimensions = None
+            if self.embed and words:
+                dimensions = {len(validate_embedding(json.loads(row[0]))) for row in db.execute(
+                    "SELECT v.vector FROM vectors v JOIN chunks c ON c.id=v.id WHERE c.tenant=?",
+                    (tenant,),
+                )}
+                if len(dimensions) > 1:
+                    raise ValueError("embedding dimensions changed; reindex documents")
+                embedding_dimensions = next(iter(dimensions), None)
             for offset in range(0, len(words), size):
                 body = " ".join(words[offset:offset + size])
                 identity = ":".join(part.replace("%", "%25").replace(":", "%3A")

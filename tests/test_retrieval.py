@@ -8,6 +8,55 @@ from knowledge_retrieval.retrieval import Store
 
 
 @pytest.mark.parametrize("replacing", [False, True])
+def test_dimensions_must_match_other_sources_without_changing_indexes(tmp_path, replacing):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", "existing", "incident response")
+    if replacing:
+        store.ingest("demo", "runbook", "original recovery procedure")
+
+    def snapshot():
+        with sqlite3.connect(store.path) as db:
+            return {table: db.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+                    for table in ("chunks", "chunk_fts", "vectors")}
+
+    original = snapshot()
+    before = store.search("demo", "incident")
+    store.embed = lambda text: [1.0]
+    with pytest.raises(ValueError, match="embedding dimensions changed during ingestion"):
+        store.ingest("demo", "runbook", "replacement recovery procedure")
+    assert snapshot() == original
+    store.embed = lambda text: [1.0, 0.0]
+    assert store.search("demo", "incident") == before
+    assert store.ingest("demo", "runbook", "replacement recovery procedure") == 1
+    assert {hit["text"] for hit in store.search("demo", "recovery")
+            if hit["source"] == "runbook"} == {"replacement recovery procedure"}
+
+
+def test_dimensions_can_differ_between_tenants_and_after_full_source_replacement(tmp_path):
+    path = str(tmp_path / "knowledge.db")
+    original = Store(path, embed=lambda text: [1.0, 0.0])
+    original.ingest("demo", "runbook", "original recovery procedure", size=1)
+    original.ingest("other", "private", "private incident response")
+    changed = Store(path, embed=lambda text: [1.0])
+    assert changed.ingest("demo", "runbook", "replacement recovery procedure", size=1) == 3
+    assert {hit["text"] for hit in changed.search("demo", "recovery")} == {
+        "replacement", "recovery", "procedure"}
+    assert [hit["source"] for hit in original.search("other", "incident")] == ["private"]
+
+
+def test_already_mixed_dimensions_require_reindexing_before_adding_sources(tmp_path):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", "runbook", "incident response")
+    store.ingest("demo", "handoff", "owner checklist")
+    with sqlite3.connect(store.path) as db:
+        db.execute("UPDATE vectors SET vector='[1.0]' WHERE id IN "
+                   "(SELECT id FROM chunks WHERE source='handoff')")
+    with pytest.raises(ValueError, match="embedding dimensions changed; reindex documents"):
+        store.ingest("demo", "new", "new recovery procedure")
+    assert Store(store.path).search("demo", "new") == []
+
+
+@pytest.mark.parametrize("replacing", [False, True])
 def test_inconsistent_chunk_dimensions_roll_back_ingestion_and_allow_retry(tmp_path, replacing):
     store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0, 0.0])
     store.ingest("demo", "unrelated", "unrelated incident checklist")
