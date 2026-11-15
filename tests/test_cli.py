@@ -6,6 +6,55 @@ from knowledge_retrieval.cli import main
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("limit", [0, 1, 7])
+def test_search_limit_controls_printed_results_and_answer_evidence(
+    tmp_path, monkeypatch, capsys, limit,
+):
+    import json
+
+    path = tmp_path / "knowledge.db"
+    store = Store(str(path))
+    for index in range(8):
+        store.ingest("demo", f"runbook-{index}", "incident recovery procedure")
+    store.ingest("other", "private", "incident recovery procedure")
+    expected = store.search("demo", "incident", limit)
+    assert len(expected) == limit
+
+    def answer(question, hits):
+        assert question == "incident"
+        assert hits == expected
+        return "Limited evidence."
+
+    monkeypatch.setattr("knowledge_retrieval.cli.grounded_answer", answer)
+    monkeypatch.setattr("sys.argv", ["knowledge", "--db", str(path), "search",
+                                    "--tenant", "demo", "incident", "--limit", str(limit),
+                                    "--answer"])
+    main()
+    captured = capsys.readouterr()
+    hits, end = json.JSONDecoder().raw_decode(captured.out)
+    assert hits == expected
+    assert captured.out[end:].strip() == "Limited evidence."
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("limit", ["-1", "1.5", "true"])
+def test_invalid_search_limit_has_no_database_or_provider_side_effects(
+    tmp_path, monkeypatch, capsys, limit,
+):
+    path = tmp_path / "knowledge.db"
+    monkeypatch.setattr("knowledge_retrieval.cli.Store",
+                        lambda *args, **kwargs: pytest.fail("invalid limit must not open a store"))
+    monkeypatch.setattr("sys.argv", ["knowledge", "--db", str(path), "--embeddings", "search",
+                                    "--tenant", "demo", "incident", "--limit", limit, "--answer"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--limit" in captured.err
+    assert not path.exists()
+
+
 @pytest.mark.parametrize("operation", ["ingest", "search", "answer"])
 def test_provider_failures_are_usage_errors_without_partial_output(
     tmp_path, monkeypatch, capsys, operation,

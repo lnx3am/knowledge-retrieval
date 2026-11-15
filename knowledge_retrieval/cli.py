@@ -22,11 +22,14 @@ def main() -> None:
     search.add_argument("--tenant", required=True)
     search.add_argument("query")
     search.add_argument("--answer", action="store_true")
+    search.add_argument("--limit", type=int, default=5, help="Maximum results (default: 5)")
     args = parser.parse_args()
     if not args.tenant.strip():
         parser.error("--tenant cannot be blank")
     if args.command == "search" and not args.query.strip():
         parser.error("query cannot be blank")
+    if args.command == "search" and args.limit < 0:
+        parser.error("--limit cannot be negative")
     if args.command == "ingest" and args.source is not None and not args.source.strip():
         parser.error("--source cannot be blank")
     if args.command == "ingest":
@@ -52,7 +55,7 @@ def main() -> None:
         print(count)
     else:
         try:
-            hits = store.search(args.tenant, args.query)
+            hits = store.search(args.tenant, args.query, args.limit)
             answer = grounded_answer(args.query, hits) if args.answer else None
         except OpenAIError:
             parser.error("model provider request failed; check credentials and provider availability")

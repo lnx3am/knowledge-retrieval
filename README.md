@@ -41,6 +41,7 @@ Ingestion defaults to the file basename as its source. For files with the same b
 `Store.ingest` requires a positive integer chunk size, and `Store.search` requires a nonnegative integer limit. Booleans and other noninteger values are rejected before database or embedding work; a zero search limit returns no results.
 
 Add `--answer` to the search command for an OpenAI-generated answer; set `OPENAI_API_KEY` first. Ingest `security.md` under another tenant and confirm that `demo` searches cannot see it.
+Use `search --tenant demo --limit 10 'incident handoff checklist'` to change the default five-result limit. The same limit controls the evidence passed to `--answer`. Zero returns no hits without requesting embeddings; negative or noninteger limits are usage errors before database or provider access.
 The search command rejects blank queries before creating a database or requesting an answer.
 Pass `--embeddings` on both ingest and search to include vector similarity. Keep that mode consistent for a database; the demo does not yet version embedding models.
 Lexical ranking matches Unicode alphanumeric words, including Chinese, Persian, and Greek text, without requiring embeddings. Matching uses word tokens rather than language-specific segmentation. Blank queries never request embeddings.
