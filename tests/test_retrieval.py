@@ -275,3 +275,21 @@ def test_blank_search_tenant_is_rejected_before_io(tmp_path, monkeypatch, tenant
                         lambda *args, **kwargs: pytest.fail("invalid tenant must not open database"))
     with pytest.raises(ValueError, match="tenant cannot be blank"):
         store.search(tenant, query, limit)
+
+
+def test_lexical_search_does_not_read_stored_vectors(tmp_path, monkeypatch):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0])
+    store.ingest("demo", "runbook", "outage response procedure")
+    store.embed = None
+    connect = sqlite3.connect
+
+    def lexical_connection(*args, **kwargs):
+        db = connect(*args, **kwargs)
+        # A lexical search should work without permission to read the vector index.
+        db.set_authorizer(lambda action, table, *rest: sqlite3.SQLITE_DENY
+                          if action == sqlite3.SQLITE_READ and table == "vectors"
+                          else sqlite3.SQLITE_OK)
+        return db
+
+    monkeypatch.setattr(sqlite3, "connect", lexical_connection)
+    assert store.search("demo", "outage")[0]["source"] == "runbook"
