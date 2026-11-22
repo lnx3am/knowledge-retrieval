@@ -7,6 +7,21 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("invalid", [[True], ["1.0"], [None]])
+def test_nonnumeric_embeddings_cannot_replace_existing_index(tmp_path, invalid):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0])
+    store.ingest("demo", "runbook", "original outage procedure")
+    store.embed = lambda text: invalid
+    with pytest.raises(ValueError, match="embedding values must be numbers"):
+        store.ingest("demo", "runbook", "replacement instructions")
+    store.embed = lambda text: [1.0]
+    hits = store.search("demo", "outage")
+    assert [hit["text"] for hit in hits] == ["original outage procedure"]
+    store.embed = lambda text: invalid
+    with pytest.raises(ValueError, match="embedding values must be numbers"):
+        store.search("demo", "outage")
+
+
 def test_tenant_filter_and_reingestion(tmp_path):
     store = Store(str(tmp_path / "knowledge.db"))
     store.ingest("a", "one", "The incident handoff checklist names an owner and next action")
