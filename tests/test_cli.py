@@ -189,3 +189,36 @@ def test_blank_tenant_is_usage_error_before_io(tmp_path, monkeypatch, capsys, te
     assert captured.out == ""
     assert "--tenant cannot be blank" in captured.err
     assert not path.exists()
+
+
+@pytest.mark.parametrize("operation", ["ingest", "search", "answer"])
+def test_provider_failure_is_usage_error_without_partial_output(
+    tmp_path, monkeypatch, capsys, operation,
+):
+    import httpx
+    from openai import APIConnectionError
+
+    path = tmp_path / "knowledge.db"
+    document = tmp_path / "runbook.md"
+    document.write_text("revised incident procedure", encoding="utf-8")
+    store = Store(str(path), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", document.name, "original incident procedure")
+
+    def fail(*args):
+        raise APIConnectionError(request=httpx.Request("POST", "https://provider.example.test"))
+
+    monkeypatch.setattr("knowledge_retrieval.cli.openai_embed", fail)
+    monkeypatch.setattr("knowledge_retrieval.cli.grounded_answer", fail)
+    flags = (["--embeddings", "ingest", "--tenant", "demo", str(document)]
+             if operation == "ingest" else
+             [*(["--embeddings"] if operation == "search" else []),
+              "search", "--tenant", "demo", "incident", "--answer"])
+    monkeypatch.setattr("sys.argv", ["retrieval", "--db", str(path), *flags])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "model provider request failed" in captured.err
+    assert "Traceback" not in captured.err
+    assert store.search("demo", "incident")[0]["text"] == "original incident procedure"

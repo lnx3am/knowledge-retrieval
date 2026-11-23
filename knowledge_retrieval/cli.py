@@ -4,6 +4,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from openai import OpenAIError
+
 from .retrieval import Store, grounded_answer, openai_embed
 
 
@@ -40,6 +42,9 @@ def main() -> None:
                                   text)
         else:
             hits = store.search(args.tenant, args.query)
+            answer = grounded_answer(args.query, hits) if args.answer else None
+    except OpenAIError as exc:
+        parser.error(f"model provider request failed: {exc}")
     except (OSError, sqlite3.Error) as exc:
         parser.error(f"cannot access retrieval database {args.db}: {exc}")
     except ValueError as exc:
@@ -49,7 +54,7 @@ def main() -> None:
     else:
         print(json.dumps(hits, indent=2))
         if args.answer:
-            print(grounded_answer(args.query, hits))
+            print(answer)
 
 
 if __name__ == "__main__":
