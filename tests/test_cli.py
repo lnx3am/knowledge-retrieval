@@ -1,7 +1,49 @@
+import sqlite3
+
 import pytest
 
 from knowledge_retrieval.cli import main
 from knowledge_retrieval.retrieval import Store
+
+
+@pytest.mark.parametrize("command", ["ingest", "search"])
+@pytest.mark.parametrize("failure", ["directory", "parent_file", "corrupt", "operation"])
+def test_database_failure_is_usage_error(tmp_path, monkeypatch, capsys, command, failure):
+    path = tmp_path / "knowledge.db"
+    document = tmp_path / "runbook.md"
+    document.write_text("incident recovery procedure", encoding="utf-8")
+    if failure == "directory":
+        path.mkdir()
+    elif failure == "parent_file":
+        path.write_text("not a directory")
+        path = path / "knowledge.db"
+    elif failure == "corrupt":
+        path.write_text("not a SQLite database")
+    else:
+        store = Store(str(path))
+        store.ingest("demo", document.name, "original incident procedure")
+        with sqlite3.connect(path) as db:
+            if command == "ingest":
+                db.execute("CREATE TRIGGER fail_ingest BEFORE INSERT ON chunks "
+                           "BEGIN SELECT RAISE(ABORT, 'storage unavailable'); END")
+            else:
+                db.execute("DROP TABLE chunk_fts")
+        # Keep the constructor from recreating the dropped table.
+        monkeypatch.setattr("knowledge_retrieval.cli.Store", lambda *args, **kwargs: store)
+    monkeypatch.setattr("knowledge_retrieval.cli.grounded_answer",
+                        lambda *args: pytest.fail("failed search must not request an answer"))
+    flags = [str(document)] if command == "ingest" else ["incident", "--answer"]
+    monkeypatch.setattr("sys.argv", ["retrieval", "--db", str(path), command,
+                                    "--tenant", "demo", *flags])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"cannot access retrieval database {path}" in captured.err
+    assert "Traceback" not in captured.err
+    if failure == "operation" and command == "ingest":
+        assert store.search("demo", "incident")[0]["text"] == "original incident procedure"
 
 
 @pytest.mark.parametrize("query", ["", "   ", "\t\n"])
