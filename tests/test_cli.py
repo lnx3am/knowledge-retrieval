@@ -6,6 +6,39 @@ from knowledge_retrieval.cli import main
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("failure", ["ingest", "query", "stored"])
+def test_invalid_embeddings_are_usage_errors_without_output(
+    tmp_path, monkeypatch, capsys, failure,
+):
+    path = tmp_path / "knowledge.db"
+    document = tmp_path / "runbook.md"
+    document.write_text("incident revised procedure", encoding="utf-8")
+    store = Store(str(path), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", document.name, "original incident procedure")
+    if failure == "stored":
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE vectors SET vector='[1.0]'")
+    vector = {"query": [1.0], "ingest": [True, 0.0], "stored": [1.0, 0.0]}[failure]
+    monkeypatch.setattr("knowledge_retrieval.cli.openai_embed", lambda text: vector)
+    monkeypatch.setattr("knowledge_retrieval.cli.grounded_answer",
+                        lambda *args: pytest.fail("failed retrieval must not request an answer"))
+    command = ["ingest", "--tenant", "demo", str(document)] if failure == "ingest" else [
+        "search", "--tenant", "demo", "incident", "--answer"]
+    monkeypatch.setattr("sys.argv", ["retrieval", "--db", str(path), "--embeddings", *command])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert str(path) in captured.err
+    assert ("embedding values must be numbers" if failure == "ingest" else
+            "embedding dimensions changed; reindex documents") in captured.err
+    assert "Traceback" not in captured.err
+    # Ingestion validation must roll back replacement, preserving both text and vectors.
+    if failure == "ingest":
+        assert store.search("demo", "incident")[0]["text"] == "original incident procedure"
+
+
 @pytest.mark.parametrize("command", ["ingest", "search"])
 @pytest.mark.parametrize("failure", ["directory", "parent_file", "corrupt", "operation"])
 def test_database_failure_is_usage_error(tmp_path, monkeypatch, capsys, command, failure):

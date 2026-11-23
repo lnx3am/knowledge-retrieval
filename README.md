@@ -39,6 +39,7 @@ Pass `--embeddings` on both ingest and search to include vector similarity. Keep
 Embedding components must be finite numbers; booleans, strings, and nulls are rejected on ingestion and search. Failed reingestion preserves the previous index.
 
 Database path and SQLite failures produce CLI usage errors (exit 2) identifying the database, without printing a result or requesting an answer. Failed ingestion transactions preserve the previous index.
+Invalid embeddings and dimension mismatches also produce CLI usage errors before printing results or requesting an answer; dimension errors retain the instruction to reindex documents.
 
 ## Trade-offs, limitations, and next production steps
 

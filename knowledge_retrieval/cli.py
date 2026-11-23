@@ -42,6 +42,8 @@ def main() -> None:
             hits = store.search(args.tenant, args.query)
     except (OSError, sqlite3.Error) as exc:
         parser.error(f"cannot access retrieval database {args.db}: {exc}")
+    except ValueError as exc:
+        parser.error(f"retrieval failed for database {args.db}: {exc}")
     if args.command == "ingest":
         print(result)
     else:
