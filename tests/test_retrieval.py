@@ -7,6 +7,21 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("invalid", [{1: 0.5}, (1.0,), "1", 1.0, None])
+def test_embedding_containers_cannot_corrupt_index(tmp_path, invalid):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0])
+    store.ingest("demo", "runbook", "original outage procedure")
+    store.embed = lambda text: invalid
+    with pytest.raises(ValueError, match="embedding must be a list"):
+        store.ingest("demo", "runbook", "replacement instructions")
+    with pytest.raises(ValueError, match="embedding must be a list"):
+        store.search("demo", "outage")
+    store.embed = lambda text: [1.0]
+    assert [hit["text"] for hit in store.search("demo", "outage")] == [
+        "original outage procedure",
+    ]
+
+
 @pytest.mark.parametrize("invalid", [[True], ["1.0"], [None]])
 def test_nonnumeric_embeddings_cannot_replace_existing_index(tmp_path, invalid):
     store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0])

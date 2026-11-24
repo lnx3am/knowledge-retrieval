@@ -53,4 +53,8 @@ Be ready to explain pre-filtering versus post-filtering for security, chunking t
 
 ## Verify
 
+Embedding callbacks must return a nonempty list of finite numbers. Other containers and
+scalar values are rejected before storage or ranking; failed reingestion preserves the
+previous index.
+
 Run `python -m pytest -q` and `python -m ruff check .` from this repository.

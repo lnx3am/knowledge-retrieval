@@ -22,6 +22,9 @@ def cosine(a: Counter[str], b: Counter[str]) -> float:
 
 
 def validate_embedding(vector: list[float]) -> list[float]:
+    if not isinstance(vector, list):
+        # Keep malformed embedding output on the CLI's validation-error path.
+        raise ValueError("embedding must be a list")  # noqa: TRY004
     if not vector:
         raise ValueError("embedding must have at least one dimension")
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in vector):
