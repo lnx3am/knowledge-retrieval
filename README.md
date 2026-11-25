@@ -36,6 +36,7 @@ Ingestion defaults to the file basename as its source. For files with the same b
 Add `--answer` to the search command for an OpenAI-generated answer; set `OPENAI_API_KEY` first. Ingest `security.md` under another tenant and confirm that `demo` searches cannot see it.
 The search command rejects blank queries before creating a database or requesting an answer.
 Pass `--embeddings` on both ingest and search to include vector similarity. Keep that mode consistent for a database; the demo does not yet version embedding models.
+With embeddings enabled, nonblank queries without ASCII tokens (for example, Persian or Chinese text) still use vector similarity with tenant filtering. Blank queries never request embeddings; lexical-only search still returns no hits when it has no ASCII tokens.
 Embedding components must be finite numbers; booleans, strings, and nulls are rejected on ingestion and search. Failed reingestion preserves the previous index.
 
 Database path and SQLite failures produce CLI usage errors (exit 2) identifying the database, without printing a result or requesting an answer. Failed ingestion transactions preserve the previous index.

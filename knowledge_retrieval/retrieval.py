@@ -94,14 +94,14 @@ class Store:
             return []
         q = tokens(query)
         terms = list(q)
-        if not terms:
+        if not query.strip() or (not terms and not self.embed):
             return []
         with closing(sqlite3.connect(self.path)) as db, db:
             lexical = db.execute(
                 "SELECT c.id FROM chunk_fts f JOIN chunks c ON c.id=f.id "
                 "WHERE c.tenant=? AND chunk_fts MATCH ? ORDER BY bm25(chunk_fts), c.id LIMIT 30",
                 (tenant, " OR ".join(terms)),
-            ).fetchall()
+            ).fetchall() if terms else []
             rows = db.execute("SELECT id,source,body FROM chunks WHERE tenant=? ORDER BY id", (tenant,)).fetchall()
             vectors = []
             if self.embed:

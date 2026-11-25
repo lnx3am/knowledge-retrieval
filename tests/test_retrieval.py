@@ -56,6 +56,28 @@ def test_vector_finds_synonym(tmp_path):
     assert store.search("a", "downtime")[0]["source"] == "runbook"
 
 
+@pytest.mark.parametrize("query", ["قطعی", "停机"])
+def test_queries_without_ascii_tokens_can_use_tenant_filtered_vectors(tmp_path, query):
+    vectors = {"outage procedure": [1.0, 0.0], "billing procedure": [0.0, 1.0],
+               "private procedure": [1.0, 0.0], query: [1.0, 0.0]}
+    store = Store(str(tmp_path / "vectors.db"), embed=vectors.__getitem__)
+    store.ingest("demo", "runbook", "outage procedure")
+    store.ingest("demo", "billing", "billing procedure")
+    store.ingest("other", "private", "private procedure")
+    hits = store.search("demo", query)
+    assert [(hit["tenant"], hit["source"]) for hit in hits] == [("demo", "runbook")]
+    store.embed = None
+    assert store.search("demo", query) == []
+
+
+@pytest.mark.parametrize("query", ["", " \t\n"])
+def test_blank_queries_do_not_request_embeddings(tmp_path, query):
+    store = Store(str(tmp_path / "vectors.db"), embed=lambda text: [1.0])
+    store.ingest("demo", "runbook", "outage procedure")
+    store.embed = lambda text: pytest.fail("blank queries must not request embeddings")
+    assert store.search("demo", query) == []
+
+
 def test_vector_ranking_normalizes_magnitude_and_omits_nonpositive_scores(tmp_path):
     vectors = {"query": [1.0, 0.0], "closest": [1.0, 0.0], "large": [10.0, 10.0],
                "opposite": [-1.0, 0.0], "orthogonal": [0.0, 1.0], "zero": [0.0, 0.0]}
