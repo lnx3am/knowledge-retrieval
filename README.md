@@ -43,6 +43,8 @@ Invalid embeddings and dimension mismatches also produce CLI usage errors before
 
 Model provider failures during embedding or answer generation produce CLI usage errors (exit 2). Search output is printed only after a requested answer succeeds, so failed commands do not emit partial results; embedding failures during reingestion preserve the previous index.
 
+Empty or whitespace-only generated answers produce CLI usage errors (exit 2) before printing retrieved hits; the provider client closes on these failures.
+
 ## Trade-offs, limitations, and next production steps
 
 Word-count chunking can split a sentence and ignores document structure. The token-overlap signal is not semantic and may fail on synonyms. The vector path makes one paid API call per chunk and does not batch requests; its model version is not stored. Add batched embedding generation with versioned vectors, reranking, document-level ACLs, incremental ingestion, source freshness, and citation verification before a production rollout. FTS query construction limits terms to alphanumeric tokens, but unbounded ingestion still needs quotas and MIME validation. A model can hallucinate citations despite the prompt; validate cited IDs and evaluate answer faithfulness separately.
