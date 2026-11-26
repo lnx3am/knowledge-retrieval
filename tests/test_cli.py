@@ -6,6 +6,39 @@ from knowledge_retrieval.cli import main
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("operation", ["ingest", "query", "stored"])
+def test_oversized_embedding_values_are_usage_errors_without_output(
+    tmp_path, monkeypatch, capsys, operation,
+):
+    import json
+
+    path = tmp_path / "knowledge.db"
+    document = tmp_path / "runbook.md"
+    document.write_text("replacement incident procedure", encoding="utf-8")
+    store = Store(str(path), embed=lambda text: [1.0, 0.0])
+    store.ingest("demo", document.name, "original incident procedure")
+    vector = [10**400, 0.0]
+    if operation == "stored":
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE vectors SET vector=?", (json.dumps(vector),))
+        vector = [1.0, 0.0]
+    monkeypatch.setattr("knowledge_retrieval.cli.openai_embed", lambda text: vector)
+    monkeypatch.setattr("knowledge_retrieval.cli.grounded_answer",
+                        lambda *args: pytest.fail("invalid vectors must not request an answer"))
+    command = ["ingest", "--tenant", "demo", str(document)] if operation == "ingest" else [
+        "search", "--tenant", "demo", "incident", "--answer"]
+    monkeypatch.setattr("sys.argv", ["retrieval", "--db", str(path), "--embeddings", *command])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "embedding values must be finite" in captured.err
+    assert str(path) in captured.err
+    if operation == "ingest":
+        assert store.search("demo", "incident")[0]["text"] == "original incident procedure"
+
+
 @pytest.mark.parametrize("failure", ["ingest", "query", "stored"])
 def test_invalid_embeddings_are_usage_errors_without_output(
     tmp_path, monkeypatch, capsys, failure,
