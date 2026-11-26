@@ -7,6 +7,35 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+@pytest.mark.parametrize("embeddings", [False, True])
+def test_search_uses_one_snapshot_during_reingestion(tmp_path, monkeypatch, embeddings):
+    from contextlib import closing
+
+    store = Store(str(tmp_path / "knowledge.db"),
+                  embed=(lambda text: [1.0]) if embeddings else None)
+    with closing(sqlite3.connect(store.path)) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+    store.ingest("demo", "runbook", "outage response procedure")
+    before = store.search("demo", "outage")
+    connect = sqlite3.connect
+    replaced = False
+
+    class ReindexingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            nonlocal replaced
+            if sql.startswith("SELECT id,source,body") and not replaced:
+                replaced = True
+                # Commit a real replacement between the lexical and chunk reads.
+                store.ingest("demo", "runbook", "")
+            return super().execute(sql, parameters)
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(
+        *args, **{**kwargs, "factory": ReindexingConnection}))
+    assert store.search("demo", "outage") == before
+    assert replaced
+    assert store.search("demo", "outage") == []
+
+
 @pytest.mark.parametrize("invalid", [{1: 0.5}, (1.0,), "1", 1.0, None])
 def test_embedding_containers_cannot_corrupt_index(tmp_path, invalid):
     store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0])
