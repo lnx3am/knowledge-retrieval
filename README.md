@@ -10,6 +10,8 @@ A useful RAG system must retrieve the right evidence and must never mix customer
 
 Ingestion replaces prior chunks for the same tenant and source in one transaction. A stable chunk ID lets evaluations point to the exact source span. Search returns chunk text and source names, not just an opaque answer. `grounded_answer` sends only retrieved excerpts to the OpenAI Responses API and asks for chunk-ID citations. The query and excerpts are still untrusted content.
 
+Source replacements acquire the SQLite write lock before reading prior chunk IDs, so overlapping ingestion cannot leave stale lexical or vector entries. Embedding calls occur while that lock is held; other writers wait up to SQLite's connection timeout.
+
 Ranking ties use chunk IDs as a stable order, so reingesting unchanged content preserves result order, including at candidate cutoffs.
 
 Embeddings must have at least one dimension, and their values must be finite. Invalid values reject ingestion without replacing the existing index, and searches reject invalid query or stored vectors rather than silently dropping results.

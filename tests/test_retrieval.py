@@ -7,6 +7,53 @@ from knowledge_retrieval.langchain_tool import make_search_tool
 from knowledge_retrieval.retrieval import Store
 
 
+def test_overlapping_source_replacements_keep_all_indexes_consistent(tmp_path, monkeypatch):
+    store = Store(str(tmp_path / "knowledge.db"), embed=lambda text: [1.0])
+    store.ingest("demo", "runbook", "original", size=1)
+    connect = sqlite3.connect
+    interleave = True
+    retry = False
+
+    class ReplacementCursor:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __iter__(self):
+            return iter(self.fetchall())
+
+        def fetchall(self):
+            nonlocal interleave, retry
+            rows = self.cursor.fetchall()
+            interleave = False
+            # Force another replacement after the old IDs have been read. A write
+            # lock must defer it until this replacement has committed.
+            try:
+                store.ingest("demo", "runbook", "competing replacement", size=1)
+            except sqlite3.OperationalError as exc:
+                assert exc.sqlite_errorcode == sqlite3.SQLITE_BUSY
+                retry = True
+            return rows
+
+    class InterleavedConnection(sqlite3.Connection):
+        def execute(self, statement, parameters=()):
+            cursor = super().execute(statement, parameters)
+            if interleave and statement.startswith("SELECT id FROM chunks"):
+                return ReplacementCursor(cursor)
+            return cursor
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *args, **kwargs: connect(
+        *args, **{**kwargs, "factory": InterleavedConnection, "timeout": 0}))
+    store.ingest("demo", "runbook", "final", size=1)
+    if retry:
+        store.ingest("demo", "runbook", "competing replacement", size=1)
+    with connect(store.path) as db:
+        chunks = db.execute("SELECT id FROM chunks").fetchall()
+        assert sorted(db.execute("SELECT id FROM chunk_fts").fetchall()) == sorted(chunks)
+        assert sorted(db.execute("SELECT id FROM vectors").fetchall()) == sorted(chunks)
+    assert {hit["text"] for hit in store.search("demo", "replacement")} == (
+        {"competing", "replacement"} if retry else {"final"})
+
+
 @pytest.mark.parametrize("embeddings", [False, True])
 def test_search_uses_one_snapshot_during_reingestion(tmp_path, monkeypatch, embeddings):
     from contextlib import closing
